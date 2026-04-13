@@ -1,0 +1,28 @@
+{
+  "name": "musicfreeplugin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "netease-plugin.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pbdm/MusicFreePlugin.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/pbdm/MusicFreePlugin/issues"
+  },
+  "homepage": "https://github.com/pbdm/MusicFreePlugin#readme",
+  "devDependencies": {
+    "axios": "^1.15.0",
+    "big-integer": "^1.6.52",
+    "crypto-js": "^4.2.0",
+    "jest": "^30.3.0",
+    "qs": "^6.15.1"
+  }
+}

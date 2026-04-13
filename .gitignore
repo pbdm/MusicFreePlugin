@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+*.log
+.DS_Store
+netease-plugin.js:Zone.Identifier
+.env
+debug.js

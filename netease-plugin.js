@@ -75,7 +75,7 @@ async function postWeapi(url, data, cookie) {
             }
         }
     );
-    return res.data;
+    return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
 }
 
 async function postEapi(url, path, data, cookie) {
@@ -86,7 +86,7 @@ async function postEapi(url, path, data, cookie) {
             'Cookie': cookie || ''
         }
     });
-    return res.data;
+    return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
 }
 
 // === 辅助转换 ===
@@ -105,9 +105,9 @@ function mapMusicItem(item) {
 
 module.exports = {
     platform: '网易云音乐-账户版',
-    version: '0.2.4',
+    version: '0.3.6',
     author: 'pbdm',
-    description: '修复评论内容与首页推荐，支持每日推荐与个人歌单',
+    description: '终极稳定版：恢复播放，全入口支持每日推荐、自建歌单及排行榜',
     supportedSearchType: ['music', 'album', 'artist', 'sheet'],
     userVariables: [
         { key: 'cookie', name: 'Cookie', hint: '请输入包含 MUSIC_U 的 Cookie' }
@@ -121,7 +121,8 @@ module.exports = {
             params: { s: query, type: searchTypeMap[type] || 1, limit: 30, offset: (page - 1) * 30 },
             headers: { ...commonHeaders, Cookie: cookie }
         });
-        const result = res.data.result;
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        const result = data.result;
         if (!result) return { isEnd: true, data: [] };
 
         let list = [];
@@ -138,8 +139,7 @@ module.exports = {
         const cookie = (env.getUserVariables() || {}).cookie || '';
         const result = [];
 
-        // 1. 每日推荐
-        if (cookie.includes('MUSIC_U')) {
+        if (cookie) {
             result.push({
                 title: '账户专属',
                 data: [
@@ -148,15 +148,18 @@ module.exports = {
             });
 
             try {
-                const account = await postWeapi('https://music.163.com/weapi/w/nuser/account/get', {}, cookie);
-                const uid = account.account?.id;
+                const accountRes = await axios.get('https://music.163.com/api/nuser/account/get', { headers: { ...commonHeaders, Cookie: cookie } });
+                const accountData = typeof accountRes.data === 'string' ? JSON.parse(accountRes.data) : accountRes.data;
+                const uid = accountData.account?.id || accountData.profile?.userId;
                 if (uid) {
-                    const res = await postWeapi('https://music.163.com/weapi/user/playlist', { uid, limit: 30, offset: 0 }, cookie);
-                    if (res.playlist) {
+                    const res = await axios.get(`https://music.163.com/api/user/playlist?uid=${uid}&limit=50`, { headers: { ...commonHeaders, Cookie: cookie } });
+                    const playlistData = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                    const list = playlistData.playlist || playlistData.playlists || [];
+                    if (list.length > 0) {
                         result.push({
                             title: '我的歌单',
-                            data: res.playlist.map(p => ({
-                                id: String(p.id), title: p.name, artist: p.creator.nickname, artwork: p.coverImgUrl
+                            data: list.map(p => ({
+                                id: String(p.id), title: p.name, artist: p.creator?.nickname || '', artwork: p.coverImgUrl
                             }))
                         });
                     }
@@ -164,16 +167,16 @@ module.exports = {
             } catch (e) {}
         }
 
-        // 2. 热门歌单
         try {
             const hotRes = await axios.get('https://music.163.com/api/playlist/list', { 
                 params: { cat: '全部', order: 'hot', limit: 18 }, 
                 headers: commonHeaders 
             });
-            if (hotRes.data && hotRes.data.playlists) {
+            const data = typeof hotRes.data === 'string' ? JSON.parse(hotRes.data) : hotRes.data;
+            if (data && data.playlists) {
                 result.push({
                     title: '热门歌单',
-                    data: hotRes.data.playlists.map(p => ({
+                    data: data.playlists.map(p => ({
                         id: String(p.id), title: p.name, artist: p.creator.nickname, artwork: p.coverImgUrl
                     }))
                 });
@@ -196,7 +199,8 @@ module.exports = {
 
         const pageSize = 50;
         const res = await axios.get('https://music.163.com/api/v6/playlist/detail', { params: { id: sheetItem.id, n: 1 }, headers: { ...commonHeaders, Cookie: cookie } });
-        const playlist = res.data.playlist;
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        const playlist = data.playlist;
         if (!playlist || !playlist.trackIds) return { isEnd: true, musicList: [] };
 
         const start = (page - 1) * pageSize;
@@ -207,10 +211,11 @@ module.exports = {
             params: { c: JSON.stringify(ids.map(id => ({ id }))), ids: JSON.stringify(ids) },
             headers: { ...commonHeaders, Cookie: cookie }
         });
+        const data2 = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
 
         return {
             isEnd: start + ids.length >= playlist.trackIds.length,
-            musicList: (res2.data.songs || []).map(mapMusicItem),
+            musicList: (data2.songs || []).map(mapMusicItem),
             sheetItem: page === 1 ? { title: playlist.name, artwork: playlist.coverImgUrl, description: playlist.description } : undefined
         };
     },
@@ -218,7 +223,8 @@ module.exports = {
     async getAlbumInfo(albumItem) {
         const cookie = (env.getUserVariables() || {}).cookie || '';
         const res = await axios.get(`https://music.163.com/api/v1/album/${albumItem.id}`, { headers: { ...commonHeaders, Cookie: cookie } });
-        return { isEnd: true, musicList: (res.data.songs || []).map(mapMusicItem), albumItem: { artwork: res.data.album.picUrl, description: res.data.album.description } };
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        return { isEnd: true, musicList: (data.songs || []).map(mapMusicItem), albumItem: { artwork: data.album.picUrl, description: data.album.description } };
     },
 
     // === 评论 ===
@@ -237,13 +243,11 @@ module.exports = {
         const data = res.data || res;
         const comments = (data.comments || []).map(c => ({
             id: String(c.commentId),
-            comment: c.content, // 内容：MusicFree 某些版本识别 comment
-            content: c.content, // 内容：某些版本识别 content
-            text: c.content,    // 内容：某些版本识别 text
-            nickName: c.user.nickname, // 昵称：注意大写 N
+            content: c.content,
+            nickName: c.user.nickname,
             avatar: c.user.avatarUrl,
-            createAt: c.time, // 时间
-            like: c.likedCount, // 点赞
+            createAt: c.time,
+            like: c.likedCount,
             location: c.ipLocation?.location
         }));
 
@@ -257,57 +261,95 @@ module.exports = {
         const res = await postWeapi('https://music.163.com/weapi/song/enhance/player/url/v1', { ids: [musicItem.id], level: qualityMap[quality] || 'standard', encodeType: 'mp3' }, cookie);
         if (res.data?.[0]?.url) return { url: res.data[0].url };
         const res2 = await axios.get('https://music.163.com/api/song/enhance/player/url', { params: { ids: `[${musicItem.id}]`, br: 320000 }, headers: { ...commonHeaders, Cookie: cookie } });
-        if (res2.data.data?.[0]?.url) return { url: res2.data.data[0].url };
+        const data2 = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
+        if (data2.data?.[0]?.url) return { url: data2.data[0].url };
         throw new Error('获取播放地址失败');
     },
 
     // === 歌词 ===
     async getLyric(musicItem) {
         const res = await axios.get('https://music.163.com/api/song/lyric', { params: { id: musicItem.id, lv: -1, tv: -1 }, headers: commonHeaders });
-        return { rawLrc: res.data.lrc?.lyric, translation: res.data.tlyric?.lyric };
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        return { rawLrc: data.lrc?.lyric, translation: data.tlyric?.lyric };
     },
 
     // === 歌单分类标签 ===
     async getRecommendSheetTags() {
         const res = await axios.get('https://music.163.com/api/playlist/catalogue', { headers: commonHeaders });
-        const sub = res.data.sub || [];
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        const sub = data.sub || [];
         return {
             pinned: [
                 { id: 'daily_recommend', title: '每日推荐' },
                 { id: 'user_created', title: '我创建的' },
-                { id: 'user_collected', title: '我收藏的' },
-                { id: '全部', title: '全部' }
+                { id: 'user_collected', title: '我收藏的' }
             ],
-            data: [{ title: '常用分类', data: sub.map(item => ({ id: item.name, title: item.name })) }]
+            data: [{ title: '常用', data: [{ id: 'daily_recommend', title: '每日推荐' }, { id: 'user_created', title: '我创建的' }, { id: 'user_collected', title: '我收藏的' }] }, { title: '分类', data: sub.map(item => ({ id: item.name, title: item.name })) }]
         };
     },
 
     async getRecommendSheetsByTag(tag, page) {
         const cookie = (env.getUserVariables() || {}).cookie || '';
-        if (tag.id === 'daily_recommend') {
-            return { isEnd: true, data: page > 1 ? [] : [{ id: 'daily_recommend', title: '每日歌曲推荐', artwork: 'https://p1.music.126.net/06vU_T-7_W260uK7mX9U-A==/109951165671182690.jpg', description: '根据你的口味生成' }] };
-        }
-        if (tag.id === 'user_created' || tag.id === 'user_collected') {
+        const tagId = String(tag.id || '');
+        const tagTitle = String(tag.title || '');
+
+        if (tagId === 'daily_recommend' || tagTitle === '每日推荐') {
             if (page > 1) return { isEnd: true, data: [] };
-            const account = await postWeapi('https://music.163.com/weapi/w/nuser/account/get', {}, cookie);
-            const uid = account.account?.id;
-            if (!uid) return { isEnd: true, data: [] };
-            const res = await postWeapi('https://music.163.com/weapi/user/playlist', { uid, limit: 1000, offset: 0 }, cookie);
-            return {
-                isEnd: true,
-                data: (res.playlist || []).filter(p => (tag.id === 'user_created' ? p.creator.userId === uid : p.creator.userId !== uid)).map(p => ({ id: String(p.id), title: p.name, artist: p.creator.nickname, artwork: p.coverImgUrl, description: p.description }))
-            };
+            return { isEnd: true, data: [{ id: 'daily_recommend', title: '每日歌曲推荐', artwork: 'https://p1.music.126.net/06vU_T-7_W260uK7mX9U-A==/109951165671182690.jpg', description: '根据你的口味生成' }] };
+        }
+
+        if (tagId === 'user_created' || tagId === 'user_collected' || tagTitle === '我创建的' || tagTitle === '我收藏的') {
+            if (page > 1) return { isEnd: true, data: [] };
+            try {
+                const accountRes = await axios.get('https://music.163.com/api/nuser/account/get', { headers: { ...commonHeaders, Cookie: cookie } });
+                const accountData = typeof accountRes.data === 'string' ? JSON.parse(accountRes.data) : accountRes.data;
+                const uid = accountData.account?.id || accountData.profile?.userId;
+                if (!uid) return { isEnd: true, data: [] };
+                
+                const res = await axios.get(`https://music.163.com/api/user/playlist?uid=${uid}&limit=1000`, { headers: { ...commonHeaders, Cookie: cookie } });
+                const playlistData = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                const list = playlistData.playlist || playlistData.playlists || [];
+                const isCreated = tagId === 'user_created' || tagTitle === '我创建的';
+                return {
+                    isEnd: true,
+                    data: list.filter(p => isCreated ? (p.subscribed === false) : (p.subscribed === true)).map(p => ({ 
+                        id: String(p.id), title: p.name, artist: p.creator?.nickname || '', artwork: p.coverImgUrl 
+                    }))
+                };
+            } catch (e) {
+                return { isEnd: true, data: [] };
+            }
         }
         const res = await axios.get('https://music.163.com/api/playlist/list', { params: { cat: tag.title || tag.id || '全部', order: 'hot', limit: 30, offset: (page - 1) * 30 }, headers: commonHeaders });
-        return { isEnd: res.data.more === false, data: (res.data.playlists || []).map(item => ({ id: String(item.id), title: item.name, artist: item.creator.nickname, artwork: item.coverImgUrl, description: item.description })) };
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        return { isEnd: data.more === false, data: (data.playlists || []).map(item => ({ id: String(item.id), title: item.name, artist: item.creator.nickname, artwork: item.coverImgUrl, description: item.description })) };
+    },
+
+    // === 排行榜 ===
+    async getTopLists() {
+        try {
+            const res = await axios.get('https://music.163.com/api/toplist', { headers: commonHeaders });
+            const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+            return [{
+                title: '官方榜',
+                data: (data.list || []).map(item => ({
+                    id: String(item.id), title: item.name, artwork: item.coverImgUrl, description: item.updateFrequency
+                }))
+            }];
+        } catch (e) { return []; }
+    },
+
+    async getTopListDetail(topListItem, page) {
+        return this.getMusicSheetInfo(topListItem, page);
     },
 
     async getUserSheet(userId, page) {
         const cookie = (env.getUserVariables() || {}).cookie || '';
         if (page > 1) return { sheetList: [] };
-        const res = await postWeapi('https://music.163.com/weapi/user/playlist', { uid: userId, limit: 1000, offset: 0 }, cookie);
+        const res = await axios.get(`https://music.163.com/api/user/playlist?uid=${userId}&limit=1000`, { headers: { ...commonHeaders, Cookie: cookie } });
+        const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
         return {
-            sheetList: (res.playlist || []).map(p => ({
+            sheetList: (data.playlist || []).map(p => ({
                 id: String(p.id), title: p.name, artist: p.creator.nickname, artwork: p.coverImgUrl, description: p.description
             }))
         };
