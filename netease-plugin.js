@@ -75,7 +75,7 @@ async function postWeapi(url, data, cookie) {
             }
         }
     );
-    return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    return res.data;
 }
 
 async function postEapi(url, path, data, cookie) {
@@ -86,7 +86,7 @@ async function postEapi(url, path, data, cookie) {
             'Cookie': cookie || ''
         }
     });
-    return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    return res.data;
 }
 
 // === 辅助转换 ===
@@ -105,9 +105,9 @@ function mapMusicItem(item) {
 
 module.exports = {
     platform: '网易云音乐-账户版',
-    version: '0.3.6',
+    version: '0.3.7',
     author: 'pbdm',
-    description: '终极稳定版：恢复播放，全入口支持每日推荐、自建歌单及排行榜',
+    description: '修正版：还原核心通信逻辑解决播放问题，支持排行榜与自建歌单',
     supportedSearchType: ['music', 'album', 'artist', 'sheet'],
     userVariables: [
         { key: 'cookie', name: 'Cookie', hint: '请输入包含 MUSIC_U 的 Cookie' }
@@ -193,7 +193,8 @@ module.exports = {
         if (sheetItem.id === 'daily_recommend') {
             if (page > 1) return { isEnd: true, musicList: [] };
             const res = await postEapi('https://music.163.com/eapi/v1/discovery/recommend/songs', '/api/v1/discovery/recommend/songs', { offset: 0, total: true, limit: 100 }, cookie);
-            const list = (res.data?.dailySongs || res.dailySongs || []).map(mapMusicItem);
+            const data = typeof res === 'string' ? JSON.parse(res) : res;
+            const list = (data.data?.dailySongs || data.dailySongs || []).map(mapMusicItem);
             return { isEnd: true, musicList: list };
         }
 
@@ -240,7 +241,7 @@ module.exports = {
             showInner: false
         }, cookie);
 
-        const data = res.data || res;
+        const data = typeof res === 'string' ? JSON.parse(res) : res;
         const comments = (data.comments || []).map(c => ({
             id: String(c.commentId),
             content: c.content,
@@ -258,11 +259,17 @@ module.exports = {
     async getMediaSource(musicItem, quality) {
         const cookie = (env.getUserVariables() || {}).cookie || '';
         const qualityMap = { low: 'standard', standard: 'higher', high: 'exhigh', super: 'lossless' };
-        const res = await postWeapi('https://music.163.com/weapi/song/enhance/player/url/v1', { ids: [musicItem.id], level: qualityMap[quality] || 'standard', encodeType: 'mp3' }, cookie);
-        if (res.data?.[0]?.url) return { url: res.data[0].url };
-        const res2 = await axios.get('https://music.163.com/api/song/enhance/player/url', { params: { ids: `[${musicItem.id}]`, br: 320000 }, headers: { ...commonHeaders, Cookie: cookie } });
+        // 关键点：将 ID 转为数字
+        const songId = Number(musicItem.id);
+        const res = await postWeapi('https://music.163.com/weapi/song/enhance/player/url/v1', { ids: [songId], level: qualityMap[quality] || 'standard', encodeType: 'mp3' }, cookie);
+        
+        const data = typeof res === 'string' ? JSON.parse(res) : res;
+        if (data.data?.[0]?.url) return { url: data.data[0].url };
+        
+        const res2 = await axios.get('https://music.163.com/api/song/enhance/player/url', { params: { ids: `[${songId}]`, br: 320000 }, headers: { ...commonHeaders, Cookie: cookie } });
         const data2 = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
         if (data2.data?.[0]?.url) return { url: data2.data[0].url };
+        
         throw new Error('获取播放地址失败');
     },
 
